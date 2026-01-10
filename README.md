@@ -7,10 +7,6 @@
 
 An intelligent web application that combines **AI-powered resume analysis** with **automated LinkedIn job scraping**. This comprehensive tool helps job seekers gain deep insights into their resumes while simultaneously discovering relevant job opportunities.
 
-## 🚀 Live Demo
-
-**Try the live application:** [ResumeRadarAI on Streamlit](https://resumeradarai.streamlit.app/)
-
 ## ✨ Features
 
 ### 📄 **Resume Analysis**
@@ -213,3 +209,4 @@ streamlit run app.py --server.port 8080
 **⭐ Star this repository if you find it helpful!**
 
 **🔗 Share with your network to help other job seekers!**
+
