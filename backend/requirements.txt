@@ -1,0 +1,23 @@
+# Backend API
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+pydantic==2.10.3
+python-multipart==0.0.17
+
+# NLP
+spacy==3.8.11
+# Statistical model. Install with: python -m spacy download en_core_web_md
+
+# Storage
+pymongo==4.9.2
+
+# Resume parsing
+PyPDF2==3.0.1
+
+# Scraping
+selenium==4.35.0
+webdriver-manager==4.0.2
+
+# Dev
+pytest==8.0.0
+httpx==0.28.1

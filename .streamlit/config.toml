@@ -1,0 +1,17 @@
+# Design tokens — Minimalism / Swiss style, professional navy.
+# Mirrors the CSS variables in theme.py so Streamlit's own widgets
+# (buttons, inputs, alerts) match the custom chrome instead of fighting it.
+
+[theme]
+base = "light"
+primaryColor = "#1E3A5F"            # --color-primary
+backgroundColor = "#F8FAFC"         # --color-background
+secondaryBackgroundColor = "#FFFFFF" # --color-card
+textColor = "#0F172A"               # --color-foreground
+font = "sans serif"
+
+[server]
+maxUploadSize = 10
+
+[browser]
+gatherUsageStats = false
