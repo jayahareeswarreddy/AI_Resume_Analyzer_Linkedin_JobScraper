@@ -65,6 +65,15 @@ deliberately:
 - Every score decomposes into `matched` and `missing`, so a ranking can
   always be explained, and `/matches/{id}/gaps` falls straight out of the
   same data as the "what should I learn next" answer.
+- The **band is capped by evidence**. A posting whose text yields only one
+  recognisable skill can still score 100%, because the candidate covers
+  everything that was found - but one skill is not grounds to call it a
+  strong fit, so `strong` needs four detected skills and `moderate` needs
+  two. The percentage reports coverage; the band reports confidence.
+
+Job descriptions are fetched from each posting's own page rather than the
+results list, which carries no description. Without that step every
+posting reaches the matcher with an empty skill set and scores zero.
 
 A dense embedding model would rank marginally better and explain nothing,
 which is the wrong trade for a tool whose purpose is to tell someone what

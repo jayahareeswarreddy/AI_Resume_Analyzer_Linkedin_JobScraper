@@ -31,6 +31,7 @@ log = logging.getLogger(__name__)
 
 SEARCH_URL = "https://www.linkedin.com/jobs/search"
 CARD_SELECTOR = "div.base-card"
+DESCRIPTION_SELECTOR = "div.show-more-less-html__markup, div.description__text"
 
 
 class ScraperError(RuntimeError):
@@ -80,19 +81,58 @@ class LinkedInScraper:
         with _driver(self.headless) as driver:
             try:
                 driver.get(url)
-                WebDriverWait(driver, 15).until(
+                WebDriverWait(driver, 30).until(
                     EC.presence_of_element_located((By.CSS_SELECTOR, CARD_SELECTOR))
                 )
             except TimeoutException:
-                # No results is a legitimate outcome, not a failure.
-                log.info("No job cards appeared for %r", title)
-                return []
+                # The wait can expire while the page is still settling, so
+                # look once more before concluding anything.
+                if not driver.find_elements(By.CSS_SELECTOR, CARD_SELECTOR):
+                    body = ""
+                    try:
+                        body = driver.find_element(By.TAG_NAME, "body").text[:400].lower()
+                    except WebDriverException:
+                        pass
+                    if "sign in" in body and "jobs" not in body:
+                        raise ScraperError(
+                            "LinkedIn served a sign-in wall instead of results. "
+                            "It does this to datacentre IPs and sometimes to "
+                            "headless browsers; try SCRAPER_HEADLESS=0."
+                        )
+                    log.info("No job cards for %r", title)
+                    return []
             except WebDriverException as exc:
                 raise ScraperError(f"Could not load LinkedIn: {exc}") from exc
 
             self._scroll_until(driver, limit)
             cards = driver.find_elements(By.CSS_SELECTOR, CARD_SELECTOR)[:limit]
-            return [p for p in (self._parse_card(c) for c in cards) if p]
+            postings = [p for p in (self._parse_card(c) for c in cards) if p]
+            # The results list carries no description, so without this the
+            # postings reach the matcher with no skills and every one of
+            # them scores zero.
+            self._fetch_descriptions(driver, postings)
+            return postings
+
+    @staticmethod
+    def _fetch_descriptions(driver: webdriver.Chrome, postings: list[dict[str, Any]]) -> None:
+        """Open each posting and pull its full description."""
+        for posting in postings:
+            url = posting.get("url")
+            if not url:
+                continue
+            try:
+                driver.get(url)
+                WebDriverWait(driver, 12).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, DESCRIPTION_SELECTOR))
+                )
+                element = driver.find_element(By.CSS_SELECTOR, DESCRIPTION_SELECTOR)
+                text = element.text.strip()
+                if text:
+                    posting["description"] = text
+            except (TimeoutException, NoSuchElementException):
+                log.info("No description found at %s", url)
+            except WebDriverException as exc:
+                log.warning("Failed to open %s: %s", url, exc)
 
     @staticmethod
     def _build_url(title: str, location: str) -> str:

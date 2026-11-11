@@ -280,6 +280,16 @@ elif page == "Job postings":
                 )
             if err:
                 st.error(err)
+            elif data["scraped"] == 0:
+                # Zero results is not a success. LinkedIn serves different
+                # markup to datacentre IPs and to headless browsers, and
+                # changes its class names without notice.
+                st.warning(
+                    "The scrape returned no postings. LinkedIn often serves "
+                    "a different page to headless browsers, or has changed "
+                    "its markup. Try SCRAPER_HEADLESS=0 to watch what the "
+                    "browser actually receives."
+                )
             else:
                 st.success(f"Scraped {data['scraped']}, stored {data['stored']} new.")
 

@@ -27,6 +27,12 @@ DEFAULT_WEIGHT = 1.0
 STRONG_THRESHOLD = 65.0
 MODERATE_THRESHOLD = 35.0
 
+# A posting whose text yields only one or two recognisable skills gives us
+# too little to judge on: matching its single skill would otherwise read as
+# a perfect fit. Bands are capped until there is enough evidence.
+STRONG_MIN_EVIDENCE = 4
+MODERATE_MIN_EVIDENCE = 2
+
 
 @dataclass(frozen=True)
 class MatchScore:
@@ -78,11 +84,20 @@ def score_match(
     total = sum(_weight_for(s, index) for s in required)
     score = round(100.0 * earned / total, 1) if total else 0.0
 
-    return MatchScore(score, band_for(score), matched, missing)
+    return MatchScore(score, band_for(score, len(required)), matched, missing)
 
 
-def band_for(score: float) -> str:
+def band_for(score: float, evidence: int | None = None) -> str:
+    """Classify a score, capped by how much evidence supported it.
+
+    `evidence` is the number of skills detected in the posting. Pass None
+    to classify a bare score with no cap.
+    """
+    if evidence is not None and evidence < MODERATE_MIN_EVIDENCE:
+        return "weak"
     if score >= STRONG_THRESHOLD:
+        if evidence is not None and evidence < STRONG_MIN_EVIDENCE:
+            return "moderate"
         return "strong"
     if score >= MODERATE_THRESHOLD:
         return "moderate"

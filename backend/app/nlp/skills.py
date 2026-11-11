@@ -57,7 +57,7 @@ SKILL_TAXONOMY: dict[str, dict[str, list[str]]] = {
     "ml_dl": {
         "TensorFlow": ["tensorflow"],
         "PyTorch": ["pytorch", "torch"],
-        "Scikit-learn": ["scikit-learn", "scikit learn", "sklearn"],
+        "Scikit-learn": ["scikit-learn", "scikit learn", "sklearn", "scikit"],
         "Keras": ["keras"],
         "CNN": ["cnn", "convolutional neural network"],
         "VGG16": ["vgg16", "vgg-16"],
@@ -165,7 +165,7 @@ class SkillExtractor:
 
         canonical: set[str] = set()
         grouped: dict[str, set[str]] = {}
-        for match_id, start, end in self.matcher(doc):
+        for match_id, _start, _end in self.matcher(doc):
             surface = self.nlp.vocab.strings[match_id]
             name, category = _SURFACE_INDEX[surface]
             canonical.add(name)
@@ -186,23 +186,9 @@ class SkillExtractor:
                 }.get(ent.label_)
                 if bucket is None:
                     continue
-                # PDF extraction leaves hard line breaks inside spans, so
-                # an entity can arrive as a name glued to a job title.
-                # Flatten the whitespace, then discard anything too long
-                # to be a real name or place.
-                # discard anything too long to be a real name or place.
-                value = " ".join(ent.text.split())
-                if not value or value in bucket or len(value) > 60:
-                    continue
-                if not any(ch.isalpha() for ch in value):
-                    continue
-                # The general-purpose NER was trained on news text, where
-                # "Docker" and "Milvus" do not appear. On a resume it tags
-                # them PERSON or ORG with real confidence. The taxonomy is
-                # ground truth for what is a technology, so it wins.
-                if ent.label_ in {"ORG", "PERSON", "GPE", "LOC"} and _is_technology(value):
-                    continue
-                bucket.append(value)
+                value = _clean_span(ent.text)
+                if value and _keep_entity(ent.label_, value) and value not in bucket:
+                    bucket.append(value)
 
         return ExtractionResult(
             skills=sorted(canonical),
@@ -215,41 +201,107 @@ class SkillExtractor:
         )
 
 
-# Canonical names and every surface form, lowercased, for the NER filter.
+# Words that head a resume section. The NER sees them glued to the text
+# that follows ("Backend & Databases: FastAPI...") and reports the whole
+# run-on as an employer.
+# Every surface form and every canonical name, lowercased. Used to veto
+# NER spans: a span naming a technology is not an employer or a person.
 _TECHNOLOGY_TERMS: frozenset[str] = frozenset(
     list(_SURFACE_INDEX)
-    + [canonical.lower() for _, (canonical, _c) in _SURFACE_INDEX.items()]
+    + [canonical.lower() for canonical, _cat in _SURFACE_INDEX.values()]
 )
 
-# Job-title words that the NER reads as a person's name or an employer.
-_ROLE_WORDS: frozenset[str] = frozenset(
-    {
-        "engineer",
-        "developer",
-        "freelance",
-        "intern",
-        "analyst",
-        "consultant",
-        "manager",
-        "architect",
-        "scientist",
-        "lead",
-        "specialist",
-    }
-)
+# A resume names employers next to degrees, coursework and job titles, and
+# the model cannot tell them apart. Rather than guess, an ORG span has to
+# carry positive evidence that it is a company or institution.
+_ORG_KEYWORDS: frozenset[str] = frozenset({
+    "inc", "ltd", "limited", "llc", "llp", "plc", "gmbh", "pvt", "private",
+    "corp", "corporation", "company", "co", "group", "holdings",
+    "technologies", "technology", "labs", "laboratories", "solutions",
+    "systems", "services", "consulting", "software", "digital", "studio",
+    "university", "college", "institute", "school", "academy", "foundation",
+})
+
+# Title words the model reads as part of an employer name.
+_ROLE_WORDS: frozenset[str] = frozenset({
+    "engineer", "developer", "freelance", "intern", "internship", "analyst",
+    "consultant", "manager", "architect", "scientist", "lead", "specialist",
+    "junior", "senior", "associate", "trainee", "designer", "administrator",
+})
+
+_SECTION_WORDS: frozenset[str] = frozenset({
+    "education", "experience", "skills", "certifications", "projects",
+    "summary", "programming", "backend", "databases", "cloud", "devops",
+    "automation", "testing", "generative", "coursework", "professional",
+    "technical", "selected", "github", "linkedin", "portfolio", "contact",
+    "ml/dl", "objective", "achievements", "publications", "languages",
+})
+
+_PERSON_RE = re.compile(r"^[A-Z][a-z'\-]+(?: [A-Z][a-z'\-]+){1,3}$")
 
 
-def _is_technology(value: str) -> bool:
-    """True when a span names a technology or a job role, not an entity."""
-    lowered = value.lower().strip(" .,;:()")
-    if lowered in _TECHNOLOGY_TERMS:
-        return True
-    tokens = set(lowered.split())
-    if tokens & _ROLE_WORDS:
-        return True
-    # "Python and FastAPI" style spans: every word is a known technology.
-    words = [w for w in lowered.replace(",", " ").split() if w not in {"and", "&"}]
-    return bool(words) and all(w in _TECHNOLOGY_TERMS for w in words)
+def _clean_span(raw: str) -> str:
+    """Flatten PDF line breaks and strip bullet glyphs and separators."""
+    value = " ".join(raw.split())
+    return value.strip(" .,;:()[]|-•·–—")
+
+
+def _keep_entity(label: str, value: str) -> bool:
+    """Decide whether a span is a real entity or extraction noise.
+
+    The model is trained on news prose. A resume is a dense two-column
+    layout of headers and comma lists, so most of what it proposes here is
+    an artefact. These rules throw away the artefacts.
+    """
+    if len(value) < 2 or len(value) > 60:
+        return False
+    if not any(ch.isalpha() for ch in value):
+        return False
+
+    words = value.lower().replace("&", " ").replace("/", " ").split()
+    if not words:
+        return False
+
+    # Anything naming a technology is not an employer, person or place.
+    if any(w.strip(".,") in _TECHNOLOGY_TERMS for w in words):
+        return False
+    if value.lower() in _TECHNOLOGY_TERMS:
+        return False
+
+    if label == "DATE":
+        # A date needs a number in it. "React.js" does not.
+        return any(ch.isdigit() for ch in value)
+
+    # Section headings and run-ons that swallowed one.
+    if any(w in _SECTION_WORDS for w in words):
+        return False
+
+    # ALL-CAPS runs are headings in a resume, not entity names.
+    letters = [c for c in value if c.isalpha()]
+    if len(letters) > 3 and all(c.isupper() for c in letters):
+        return False
+
+    if label == "PERSON":
+        return bool(_PERSON_RE.match(value))
+
+    if label in {"GPE", "LOC"}:
+        return len(words) <= 4
+
+    # ORG, the noisiest bucket by far.
+    if any(ch.isdigit() for ch in value):
+        return False
+    if any(w in _ROLE_WORDS for w in words):
+        return False
+    # An acronym on a resume is a degree or a technology, not an employer.
+    if any(len(w) > 2 and w.isupper() for w in value.split()):
+        return False
+    if len(words) > 6:
+        return False
+    if len(words) == 1:
+        token = value.split()[0]
+        return token[:1].isupper() and len(token) >= 3
+    # Multi-word spans must name themselves a company or an institution.
+    return any(w in _ORG_KEYWORDS for w in words)
 
 
 def _max_years(text: str) -> float | None:

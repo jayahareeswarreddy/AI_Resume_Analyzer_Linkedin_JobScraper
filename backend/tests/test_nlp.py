@@ -92,8 +92,22 @@ def test_real_organisations_and_places_survive_the_filter(extractor):
 # --------------------------------------------------------------------------
 
 def test_full_coverage_scores_100():
-    result = score_match(["Python", "Docker"], ["Python", "Docker"])
+    skills = ["Python", "Docker", "FastAPI", "MongoDB"]
+    result = score_match(skills, skills)
     assert result.score == 100.0 and result.band == "strong"
+
+
+def test_a_thinly_described_posting_cannot_read_as_a_strong_match():
+    """One detected skill is not evidence of a strong fit, even at 100%."""
+    result = score_match(["Python"], ["Python"])
+    assert result.score == 100.0
+    assert result.band == "weak"
+
+
+def test_a_few_skills_cap_the_band_at_moderate():
+    result = score_match(["Python", "Docker"], ["Python", "Docker"])
+    assert result.score == 100.0
+    assert result.band == "moderate"
 
 
 def test_no_overlap_scores_zero_and_lists_everything_missing():

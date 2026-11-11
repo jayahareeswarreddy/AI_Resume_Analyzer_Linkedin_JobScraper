@@ -161,14 +161,14 @@ def test_scrape_rejects_an_empty_title(client):
 def test_matches_rank_by_coverage_and_explain_the_gap(client, repos):
     resumes, jobs = repos
     resume_id = resumes.create(
-        {"filename": "cv.pdf", "skills": ["Python", "FastAPI", "MongoDB"]}
+        {"filename": "cv.pdf", "skills": ["Python", "FastAPI", "MongoDB", "Docker"]}
     )
     jobs.upsert_many(
         [
             {
                 "title": "Perfect fit",
                 "url": "u1",
-                "skills": ["Python", "FastAPI", "MongoDB"],
+                "skills": ["Python", "FastAPI", "MongoDB", "Docker"],
             },
             {"title": "Partial fit", "url": "u2", "skills": ["Python", "Kubernetes"]},
             {"title": "No fit", "url": "u3", "skills": ["Java", "Spring"]},
