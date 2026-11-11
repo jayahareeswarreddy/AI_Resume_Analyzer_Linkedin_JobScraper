@@ -53,6 +53,8 @@ SKILL_TAXONOMY: dict[str, dict[str, list[str]]] = {
         "QLoRA": ["qlora"],
         "Fine-tuning": ["fine tuning", "fine-tuning", "finetuning"],
         "OpenAI API": ["openai", "gpt-4", "gpt-4o", "chatgpt api"],
+        "Copilot": ["copilot", "copilot studio", "github copilot"],
+        "Workato": ["workato"],
     },
     "ml_dl": {
         "TensorFlow": ["tensorflow"],
@@ -65,6 +67,8 @@ SKILL_TAXONOMY: dict[str, dict[str, list[str]]] = {
         "Named Entity Recognition": ["named entity recognition", "ner"],
         "spaCy": ["spacy"],
         "Pandas": ["pandas"],
+        "Tableau": ["tableau"],
+        "Power BI": ["power bi", "powerbi"],
         "NumPy": ["numpy"],
     },
     "backend": {
@@ -86,6 +90,9 @@ SKILL_TAXONOMY: dict[str, dict[str, list[str]]] = {
         "Milvus": ["milvus"],
         "FAISS": ["faiss"],
         "Elasticsearch": ["elasticsearch"],
+        "SQLite": ["sqlite"],
+        "BigQuery": ["bigquery"],
+        "Snowflake": ["snowflake"],
     },
     "cloud_devops": {
         "Docker": ["docker", "containerisation", "containerization"],
@@ -97,6 +104,11 @@ SKILL_TAXONOMY: dict[str, dict[str, list[str]]] = {
         "Git": ["git"],
         "GitHub": ["github"],
         "Linux": ["linux"],
+        "Terraform": ["terraform"],
+        "Ansible": ["ansible"],
+        "Jenkins": ["jenkins"],
+        "Agile": ["agile", "scrum", "kanban"],
+        "SaaS": ["saas"],
         "Postman": ["postman"],
     },
     "frontend": {
@@ -187,7 +199,19 @@ class SkillExtractor:
                 if bucket is None:
                     continue
                 value = _clean_span(ent.text)
-                if value and _keep_entity(ent.label_, value) and value not in bucket:
+                if not value or value in bucket:
+                    continue
+                previous = doc[ent.start - 1] if ent.start > 0 else None
+                keep = _keep_entity(
+                    ent.label_,
+                    value,
+                    is_nominal=ent.root.pos_ in {"PROPN", "NOUN", "X"},
+                    preceded_by_cue=(
+                        previous is not None
+                        and previous.text.lower() in _EMPLOYER_CUES
+                    ),
+                )
+                if keep:
                     bucket.append(value)
 
         return ExtractionResult(
@@ -215,11 +239,14 @@ _TECHNOLOGY_TERMS: frozenset[str] = frozenset(
 # the model cannot tell them apart. Rather than guess, an ORG span has to
 # carry positive evidence that it is a company or institution.
 _ORG_KEYWORDS: frozenset[str] = frozenset({
-    "inc", "ltd", "limited", "llc", "llp", "plc", "gmbh", "pvt", "private",
-    "corp", "corporation", "company", "co", "group", "holdings",
-    "technologies", "technology", "labs", "laboratories", "solutions",
-    "systems", "services", "consulting", "software", "digital", "studio",
-    "university", "college", "institute", "school", "academy", "foundation",
+    "inc", "inc.", "ltd", "ltd.", "limited", "llc", "llp", "plc", "gmbh",
+    "pvt", "private", "corp", "corporation", "incorporated", "holdings",
+    "university", "college", "institute", "academy", "foundation",
+})
+
+# Prepositions that introduce an employer: "at Wipro", "with Infosys".
+_EMPLOYER_CUES: frozenset[str] = frozenset({
+    "at", "with", "for", "@", "joined", "from",
 })
 
 # Title words the model reads as part of an employer name.
@@ -243,10 +270,22 @@ _PERSON_RE = re.compile(r"^[A-Z][a-z'\-]+(?: [A-Z][a-z'\-]+){1,3}$")
 def _clean_span(raw: str) -> str:
     """Flatten PDF line breaks and strip bullet glyphs and separators."""
     value = " ".join(raw.split())
-    return value.strip(" .,;:()[]|-•·–—")
+    value = value.strip(" .,;:()[]|-•·–—")
+    # The NER often swallows the article: "the Cisco Networking Academy".
+    for article in ("the ", "The ", "a ", "A ", "an ", "An "):
+        if value.startswith(article):
+            value = value[len(article):]
+            break
+    return value
 
 
-def _keep_entity(label: str, value: str) -> bool:
+def _keep_entity(
+    label: str,
+    value: str,
+    *,
+    is_nominal: bool = True,
+    preceded_by_cue: bool = False,
+) -> bool:
     """Decide whether a span is a real entity or extraction noise.
 
     The model is trained on news prose. A resume is a dense two-column
@@ -254,6 +293,10 @@ def _keep_entity(label: str, value: str) -> bool:
     an artefact. These rules throw away the artefacts.
     """
     if len(value) < 2 or len(value) > 60:
+        return False
+    # The tagger knows "Evaluated" is a verb even when the NER calls it an
+    # organisation. Only nouns can name a thing.
+    if not is_nominal:
         return False
     if not any(ch.isalpha() for ch in value):
         return False
@@ -292,16 +335,16 @@ def _keep_entity(label: str, value: str) -> bool:
         return False
     if any(w in _ROLE_WORDS for w in words):
         return False
-    # An acronym on a resume is a degree or a technology, not an employer.
     if any(len(w) > 2 and w.isupper() for w in value.split()):
         return False
     if len(words) > 6:
         return False
-    if len(words) == 1:
-        token = value.split()[0]
-        return token[:1].isupper() and len(token) >= 3
-    # Multi-word spans must name themselves a company or an institution.
-    return any(w in _ORG_KEYWORDS for w in words)
+    # Shape alone is not evidence: a capitalised word at the start of a
+    # bullet ("Evaluated...", "Coordinated...") looks exactly like a
+    # company name. Require the span either to name itself a legal or
+    # academic entity, or to sit after a preposition that introduces an
+    # employer.
+    return any(w in _ORG_KEYWORDS for w in words) or preceded_by_cue
 
 
 def _max_years(text: str) -> float | None:

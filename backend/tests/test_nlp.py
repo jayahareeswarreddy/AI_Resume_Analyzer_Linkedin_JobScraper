@@ -191,3 +191,63 @@ def test_normalise_removes_hyphenation_at_line_breaks():
 
 def test_normalise_collapses_runs_of_blank_lines():
     assert "\n\n\n" not in normalise("a\n\n\n\n\nb")
+
+
+# --------------------------------------------------------------------------
+# Entity filtering regressions
+#
+# Each case below was reported as an "employer" by a real run before the
+# contextual rules were added.
+# --------------------------------------------------------------------------
+
+RESUME_SAMPLE = """Bhargavi Gudisa, Morrisville, NC, USA.
+Software Engineer at Wipro Limited India from Aug 2024 to May 2025.
+M.S in Computer Science, Florida Atlantic University, Dec 2025. GPA 3.86.
+Evaluated infrastructure using Terraform and Docker on Server instances.
+Coordinated Agile delivery for a SaaS platform with Microsoft.
+Built dashboards in Tableau and automations in Workato.
+Used SQLite and Database Systems coursework. Microsoft Copilot Studio pilot.
+Certified by the Coffee Quality Institute and the Cisco Networking Academy.
+5 years of experience."""
+
+
+@pytest.fixture(scope="module")
+def sample(extractor):
+    return extractor.extract(RESUME_SAMPLE)
+
+
+@pytest.mark.parametrize(
+    "noise",
+    ["Evaluated", "Coordinated", "Terraform", "Server", "Agile", "SaaS",
+     "SQLite", "Database Systems", "Microsoft Copilot Studio", "Tableau"],
+)
+def test_noise_is_not_reported_as_an_employer(sample, noise):
+    assert noise not in sample.organisations
+
+
+@pytest.mark.parametrize(
+    "employer",
+    ["Wipro Limited India", "Florida Atlantic University",
+     "Coffee Quality Institute", "Cisco Networking Academy"],
+)
+def test_real_employers_are_kept(sample, employer):
+    assert employer in sample.organisations
+
+
+def test_a_leading_article_is_stripped(sample):
+    assert not any(o.lower().startswith("the ") for o in sample.organisations)
+
+
+def test_degrees_and_tools_are_not_locations(sample):
+    for noise in ("M.S", "Tableau", "Workato"):
+        assert noise not in sample.locations
+
+
+def test_real_places_are_kept(sample):
+    assert "Morrisville" in sample.locations
+
+
+def test_a_verb_is_never_an_entity(extractor):
+    """'Evaluated' at the start of a bullet looks exactly like a company."""
+    result = extractor.extract("Evaluated vendors. Coordinated releases.")
+    assert result.organisations == []
